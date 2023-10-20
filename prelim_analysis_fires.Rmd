@@ -1,0 +1,1037 @@
+---
+title: "Why is the Amazon burning?"
+author: "Mirza Cengic"
+date: "August 24, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Development of satellite technology and earth observation methods has enabled us an unprecedented insight into the state of the planet Earth. There are currently over XXX earth observation satellites orbiting the earth, and we can access data from many of them for free. They give us information about ..., ..., ..., and they enable us to see the state of Earth's systems in very short amount of time, especially when time is crucial. One of the events that many seem to write about recently are the fires in South America, and in particular the fires in the Amazon rainforest.
+Researchers have detected an increase in deforestation in Brazil, which increased since June. This has been a result of new policies and new sentiment of current brazil government.
+
+There are many different reports coming from various sources. And the current state of information access in the current political climate of Brazil seems to be heading towards the road that Trump paved, where he restrained powers of the EPA. Since there are a lot of very useful data in the public domain, I decided to look for myself what is happening in South America.
+
+
+The natural areas of South America, and the indigenous lands are under threat. Current president of Brazil, Jair Bolsonaro, considers indigenous people a "problem".
+“The Brazilian cavalry was very incompetent. Competent, yes, was the American cavalry that decimated its Indians in the past and nowadays does not have this problem in their country.”
+
+On his first day as president, Bolsonaro transferred the authority to protect Indigenous lands from Brazil’s National Indian Foundation, or FUNAI, a government entity tasked with the protection of Indigenous communities, to the Ministry of Agriculture, handing a victory to the powerful agribusiness sector that backed his campaign and has its eyes on large tracts of pristine forest. Sydney Possuelo, a veteran Indigenous observer and former FUNAI president, described the move as “the death” of FUNAI, in an interview with the Folha de São Paulo newspaper.
+
+
+Note: FUNAI is an organization that sucedded SPI (Servico de Protecao ao Indio), established by Candido Rondon.
+
+Bolsonaro won in Rondonia by a wide margin. Rondonia was named after Candido Rondon, who fought for the rights fo indigenous people.
+
+
+https://theintercept.com/2019/02/16/brazil-bolsonaro-indigenous-land/
+[link](https://piaui.folha.uol.com.br/lupa/2018/12/06/verificamos-bolsonaro-cavalaria/)
+
+
+Find indigenous people territory shapefile. There could be a link here - [link-in](http://www.landmarkmap.org/data/#data-4)
+
+https://unearthed.greenpeace.org/2017/12/01/brazil-amazon-indigenous-violence-rondonia/
+
+Check how close are the fires to the 163 road leading to Miritituba.
+
+[excellent article](https://theintercept.com/2019/07/06/brazil-amazon-rainforest-indigenous-conservation-agribusiness-ranching/)
+[another one](https://theintercept.com/2019/08/23/gop-lobbyists-help-brazil-recruit-u-s-companies-to-exploit-the-amazon/)
+https://phys.org/news/2019-08-amazon_1.html
+
+[vizzuality article](https://medium.com/vizzuality-blog/the-amazon-is-on-fire-is-it-worse-than-normal-5fa430a7880e)
+
+[Lovejoy article](https://advances.sciencemag.org/content/4/2/eaat2340)
+
+[budget cuts](https://www.axios.com/amazon-rainforest-bolsonaro-brazil-south-america-fda08c12-0de2-43ce-93f0-d02709b18e7b.html)
+
+[rudy guilani](https://theintercept.com/2018/10/05/rudy-giuliani-amazon-contract-brazil-election/)
+
+[august and tipping points](https://www.newscientist.com/article/2214734-its-officially-now-the-worst-ever-august-for-amazon-deforestation/?utm_term=Autofeed&utm_medium=SOC&utm_source=Twitter#Echobox=1567101051)
+
+[fires worldwide](https://www.nytimes.com/2019/08/28/climate/fire-amazon-africa-siberia-worldwide.html?smid=tw-nytimes&smtyp=cur#commentsContainer)
+
+
+#### Script setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(Rahat, raster, tidyverse, extdplyr, lubridate, ggmap,  ggthemes, sf,  mapview, janitor, tictoc, fasterize, patchwork, glue, cowplot)
+
+```
+
+
+
+#### Load data 
+
+```{r load_data}
+# Loading data:
+# VIIRS data, at 375meters, last 7 days and historical (from when?)
+# MODIS data, at 1 km, last 7 days and historical
+# ESA land cover data
+# Administrative borders of Brazil
+# Intact forests raster layer (Potapov)
+# Amazon biome limits (polygon)
+# Distance layers (not entirely done yet)
+files_loaded_name <- "tmp/amazon_data_loaded.RData"
+
+
+
+if (!file.exists(files_loaded_name))
+{
+# historical_modis <- st_read("Data/Modis_historical.gpkg")
+historical_viirs <- st_read("Data/VIIRS_historical.gpkg")
+
+# current_modis <- st_read("Data/Modis_current.gpkg")
+current_viirs <- st_read("Data/VIIRS_current.gpkg")
+
+# Land coverf
+esa_brazil <- raster("Data_raw/ESA_Brazil.tif")
+
+# Load shapfile with brazil states
+brazil_adm <- st_read("Data/Brazil_GADM.gpkg") %>% 
+  mutate(
+    area = units::set_units(st_area(.), "km^2")
+  )
+
+# Intact forests layer
+ifl_raster <- raster("Data/IFL_raster.tif")
+
+# Load natural earth with NAs as non forest, cropped with amazon biome outline
+NE_amazon_forest <- raster("Data/NE_samer_amazon.tif")
+
+
+# Amazon biome limits
+amazon_biome <- st_read("Data_raw/amapoly_ivb/amapoly_ivb.shp")
+###################
+# output_folder <- milkunize2("Projects/Other/Amazon")
+
+# crops_mosaic_distance <- glue("{output_folder}/Crops_mosaic_distance_px.tif")
+
+NE_samer_small <- raster("Data/NE_samer_small.tif")
+# NE_samer_large <- raster("Data/NE_samer_large.tif")
+
+samer_countries <- st_read("Data/samer_countries.gpkg") %>% 
+    st_simplify()
+
+# esa_1km <- "Projects/Other/Amazon/landcover_amazon_1km.tif" %>% 
+  # milkunize2() %>% 
+  # raster()
+esa_1km <- raster("Data_raw/ESA_Brazil.tif")
+
+# Indigenous areas
+indigenous_areas <- st_read("Data/Indigenous_territories.gpkg")
+
+save.image(file = files_loaded_name)
+  
+} else {
+  load(files_loaded_name)
+}
+
+```
+
+
+#### Density of fires per state
+
+```{r}
+
+# Do spatial join of VIIRS fires data, with the Brazil administrative borders data
+# This is so we can see which fires are in Brazil, and in which state of Brazil (and how many)
+current_viirs_brazil <- st_join(current_viirs, brazil_adm, join = st_intersects)
+
+# Calculate number of fire events per state, and calculate the density of fire events per state
+current_viirs_brazil_cleaned <- current_viirs_brazil %>% 
+  filter(!is.na(NAME_0)) %>% 
+  group_by(NAME_1) %>%
+  mutate(events_n = n()) %>%
+  ungroup() %>%
+  transmute(
+    date = ACQ_DATE,
+    state = NAME_1,
+    events_n,
+    area,
+    event_density = events_n / area
+  ) 
+
+# Calculate fire density per area
+current_viirs_brazil_cleaned %>% 
+  st_set_geometry(NULL) %>% 
+  distinct(state, .keep_all = TRUE) %>% 
+  arrange(desc(event_density)) %>% 
+  dplyr::select(state, event_density)
+```
+
+
+https://www.nytimes.com/interactive/2019/08/24/world/americas/amazon-rain-forest-fire-maps.html
+
+
+
+#### Calculate number of fires on 1 or 10km level
+```{r}
+
+fire_freq_filename <- "Data/Fire_freq.gpkg"
+my_mask <- aggregate(NE_samer_small, 0.3 / res(NE_samer_small)[1])
+
+tic("Raster to poly")
+mask_1deg <- rasterToPolygons(my_mask) %>% 
+  st_as_sf() %>% 
+  transmute(
+    vals = 1:n()
+  )
+toc()
+
+tic("Spatial join")
+
+# fire_frequency <- st_join(mask_1deg, current_viirs_brazil, join = st_intersects)
+fire_frequency <- st_join(mask_1deg, current_viirs, join = st_intersects)
+
+toc()
+
+
+if (!file.exists(fire_freq_filename))
+{
+  
+
+
+
+# fires_count <- 
+tic("Count")
+fire_freq_count <- fire_frequency %>%
+  group_by(vals) %>% 
+    summarize(n = n()) %>% 
+  st_centroid() %>% 
+  filter(n != 1)
+toc()
+
+# fire_freq_count %>% 
+#   ggplot() + 
+#   geom_sf(aes(size = n), color = "red")
+
+st_write(fire_freq_count, fire_freq_filename)
+  
+} else {
+
+  fire_freq_count <- st_read(fire_freq_filename)  
+}
+
+```
+
+#### Fire frequency with forests burnt percentage
+```{r}
+# Needs work, some old paths and some useful extract functions
+
+# lc <- "Data_raw/ESA_Brazil_1km.tif" %>% 
+  # raster()
+
+
+current_viirs_lc_filename <- "Data/current_viirs_lc_filename.gpkg"
+
+if (!file.exists(current_viirs_lc_filename))
+{
+  
+esa <- "ESA_landcover/TIFF/ESACCI-LC-L4-LCCS-Map-300m-P1Y-2015-v2.0.7.tif" %>% 
+  milkunize2("data") %>% 
+  raster()
+
+tic("Extracting")
+viirs_lc <- raster::extract(esa, current_viirs, na.rm = TRUE, sp = TRUE) %>% 
+  st_as_sf() 
+toc()
+
+viirs_lc <- viirs_lc %>% 
+  rename(lc = ncol(.) - 1) 
+ 
+st_write(viirs_lc, current_viirs_lc_filename)
+
+} else {
+  
+  viirs_lc <- st_read(current_viirs_lc_filename)
+}
+
+fire_frequency_lc <- st_join(viirs_lc, mask_1deg, join = st_intersects)
+# fire_frequency_lc <- st_join(mask_1deg, viirs_lc, join = st_intersects)
+
+# toc()
+
+# fire_freq_count <- 
+# aa <-   fire_frequency_lc %>% 
+#     filter(!is.na(vals)) %>% 
+#     mutate(lc = as.factor(lc))
+
+forest_fire_pct <- fire_frequency_lc %>% 
+  filter(!is.na(vals)) %>%
+  pct_routine(vals, lc) %>% 
+  filter(lc == 50) %>% 
+  mutate(pct = pct * 100) %>% 
+  ungroup()
+
+grid_fire <- fire_frequency %>%
+  group_by(vals) %>% 
+    summarize(n = n()) %>% 
+  # st_centroid() %>% 
+  filter(n != 1)
+
+points_fire_proportion <- grid_fire %>% 
+  left_join(forest_fire_pct) %>% 
+  mutate(
+    pct = ifelse(is.na(pct), 0, pct)
+  ) %>% 
+  st_centroid() %>% 
+   mutate(
+      pct_rcl = as.factor(case_when(
+        pct <= 1 ~ 0,
+        pct > 1 & pct <= 25 ~ 25,
+        pct > 25 & pct <= 50 ~ 50,
+        pct > 50 & pct <= 75 ~ 75,
+        pct > 75 & pct <= 100 ~ 100,
+        TRUE ~ 0
+      ))
+    )
+
+
+ggplot() +
+  geom_sf(data = points_fire_proportion, aes(size = n, color = pct_rcl),
+          # color = "red2",
+            alpha = 0.7, inherit.aes = FALSE) +
+  # scale_color_gradient(low = "#d73027", high = "#1a9850") +
+  # scale_color_gradient2(low = "#f7fcb9", mid = "#addd8e", high = "#31a354") +
+  geom_sf(data = amazon_biome, fill = "green", alpha = 0.1, color = "grey10") +
+                      # geom_sf(data = samer_countries, fill = NA,
+    # # linetype = "dotted",
+    # color = "grey45") +
+  coord_sf(datum = NA, xlim = c(-78, -42), ylim = c(-21, 12)) +
+    theme_map() +
+  theme(
+    legend.position = "none"
+  )
+
+
+
+
+
+```
+
+
+#### Fires map 
+
+I can map another variable to dot color perhaps. Maybe percentage of forests as LC?
+
+[map inspiration](https://www.hcn.org/articles/scientific-research-people-are-to-blame-for-longer-fire-seasons)
+```{r}
+
+
+# register_goowgle(key = "AIzaSyDwXacVpD7bbbdYKelR_rJzajdTaZw0gqI")
+
+
+# bra <- c(left = -75, bottom = -30, right = -30, top = 5)
+
+# myMap <- get_map(location = bra, maptype = "satellite",
+                 # source = "google")
+
+viirs_june <- historical_viirs %>% 
+  filter(acq_date > as_date("2019-06-01")) %>% 
+  rename(geometry = geom) 
+
+fire_sample <- current_viirs_brazil %>% 
+  sample_n(100)
+
+ifl_resampled_filename <- "Data/IFL_raster_resampled.tif"
+
+if (!file.exists(ifl_resampled_filename))
+{
+  ifl_raster_resampled <- resample(ifl_raster, NE_samer_small, method = "ngb")
+  writeRaster(ifl_raster_resampled, ifl_resampled_filename, options = "COMPRESS=LZW")
+} else {
+  ifl_raster_resampled <- raster(ifl_resampled_filename)
+}
+
+
+
+# NE_samer_small <- raster("Data/NE_samer_small.tif")
+
+r_stack <- stack(NE_samer_small, ifl_raster_resampled)
+
+r_stack_agg <- aggregate(r_stack, 0.2 / res(NE_samer_small)[1])
+
+NE_samer_small_gg <- raster_to_gg(r_stack_agg[[1]])
+# NE_samer_large_gg <- raster_to_gg(NE_samer_large)
+NE_amazon_forest_gg <- raster_to_gg(r_stack_agg[[2]])
+
+
+# ifl_raster_gg <- raster_to_gg(ifl_raster)
+
+p <- ggplot() +
+      # geom_sf(data = current_viirs_brazil_cleaned, color = "red", size = 0.95,
+  # geom_sf(data = ama) +
+  geom_tile(data = NE_samer_small_gg, aes(x = x, y = y, fill = NE_samer_small),
+            show.legend = FALSE) +
+  scale_fill_gradient2(low = "grey60", 
+                       mid = "lightyellow2",
+                       high = "grey40") + # Grey
+  # scale_fill_discrete() + # Grey
+  geom_tile(data = NE_amazon_forest_gg, aes(x = x, y = y, fill = NE_samer_amazon), alpha = 0.45, fill = "green2") +
+    # scale_colour_discrete(drop=FALSE) + #forces all levels to display
+  # geom_sf(data = current_viirs_brazil_cleaned, color = "red2", size = 0.95,
+  # geom_tile(data = ifl_raster_gg, aes(x = x, y = y, fill = IFL_raster), color = "green") +
+  # geom_sf(data = fire_freq_count, aes(size = n), color = "red2",
+  geom_sf(data = fire_sample, color = "red2", size = 0.95,
+            alpha = 0.7, inherit.aes = FALSE) +
+  geom_sf(data = amazon_biome, fill = "green", alpha = 0.1, color = "grey10") +
+   annotate("text", x = -45.5, y = 2.2,
+            label = "Point size indicates\nthe number of fires.",
+            family = "ubuntu", size = 3.5, color = "grey10") +
+    annotate("segment", x = -45, y = 1, 
+             xend = -44.35, yend = -7.2, color = "grey10",
+             arrow = arrow(angle = 20, length = unit(2, "mm"), type = "closed")) +
+    # geom_sf(data = samer_countries, fill = NA,
+    # # linetype = "dotted",
+    # color = "grey45") +
+  coord_sf(datum = NA, xlim = c(-78, -42), ylim = c(-21, 12)) +
+    theme_map() +
+  theme(
+    legend.position = "none"
+  )
+p
+
+# ggsave("Output/Figures/map_fireevents_amazon_hires.png", p, dpi = 300, width = 20, height = 16)
+
+
+# ggsave("Output/Figures/map_firefreq_amazon_hires.png", p, dpi = 300, width = 20, height = 16)
+
+p1 <- ggplot() +
+      # geom_sf(data = current_viirs_brazil_cleaned, color = "red", size = 0.95,
+  # geom_sf(data = ama) +
+  geom_tile(data = NE_samer_small_gg, aes(x = x, y = y, fill = NE_samer_small),
+            show.legend = FALSE) +
+  scale_fill_gradient2(low = "grey60", 
+                       mid = "lightyellow2",
+                       high = "grey40") + # Grey
+  geom_tile(data = NE_amazon_forest_gg, aes(x = x, y = y, fill = NE_samer_amazon), alpha = 0.45, fill = "green2") +
+  # geom_sf(data = current_viirs_brazil_cleaned, color = "red2", size = 0.95,
+  # geom_tile(data = ifl_raster_gg, aes(x = x, y = y, fill = IFL_raster), color = "green") +
+  # geom_sf(data = points_fire_proportion, aes(size = n, color = pct), #THIS ONE
+           # inherit.aes = FALSE) +
+  scale_color_gradient(low = "#fd8d3c", high = "#bd0026") +
+  # scale_color_gradient2(low = "#d73027", mid = "#ffffbf", high = "#1a9850") +
+      geom_sf(data = samer_countries, fill = NA,
+    # # linetype = "dotted",
+    color = "grey40") +
+  geom_sf(data = amazon_biome, fill = NA, alpha = 0.1, color = "grey10",
+          size = 1) +
+  coord_sf(datum = NA, xlim = c(-78, -42), ylim = c(-21, 12)) +
+    theme_map() +
+  theme(
+    legend.position = "none"
+  )
+
+p1
+# ggsave("Output/Figures/map_hires.png", p1, 
+       # dpi = 400, width = 14, height = 10)
+
+```
+
+
+#### Data quality & landcover stuff
+
+Confidence in fire events
+```{r eval=FALSE, include=FALSE}
+# 
+
+fires_modis_lc <- raster::extract(esa_brazil, current_modis, na.rm = TRUE, sp = TRUE) %>% 
+  st_as_sf() 
+
+
+fires_viirs_lc <- raster::extract(esa_brazil, 
+                                  current_viirs, 
+                                  na.rm = TRUE, sp = TRUE) %>% 
+  st_as_sf() 
+
+
+fires_viirs_ifl_lc <- raster::extract(ifl_raster, 
+                                  fires_viirs_lc, 
+                                  na.rm = TRUE, sp = TRUE) %>% 
+  st_as_sf() 
+
+
+
+dist_mosaic_name <- glue("{output_folder}/mosaic_dist_wgs.tif")
+
+mos_dist <- raster(dist_mosaic_name)
+plot(mos_dist)
+
+fires_viirs_ifl_dist_lc <- raster::extract(mos_dist, 
+                                  fires_viirs_ifl_lc, 
+                                  na.rm = TRUE, sp = TRUE) %>% 
+  st_as_sf() 
+
+
+(fires_viirs_ifl_dist_lc$mosaic_dist_wgs / 1000) %>% hist
+
+fires_viirs_ifl_dist_lc %>% 
+  mutate(
+    distance = mosaic_dist_wgs / 1000
+  ) %>% 
+  filter(distance > 0) %>% 
+  arrange(distance %>% desc()) %>% 
+  slice(1:50) %>% 
+  mapview()
+
+
+fires_viirs_ifl_lc %>% 
+  st_set_geometry(NULL) %>% 
+  tabyl(ESA_Brazil, layer)
+
+fires_viirs_lc
+fires_modis_lc
+
+mapview(NE_samer_small, maxpixels = ncell(NE_samer_small))
+
+fires_viirs_ifl_lc %>% 
+  rename(landcover = ESA_Brazil) %>% 
+  tabyl(landcover) %>% 
+  arrange(desc(n)) %>% 
+  mutate(
+    percent = percent * 100
+  )
+
+```
+
+
+
+
+
+```{r wrangle, eval=FALSE, include=TRUE}
+# rds <- roads_raw %>% 
+  # filter(GP_RTP == 1)
+# writeRaster(esa_brazil, "Projects/Amazon/Data/ESA_Brazil.tif", options = "COMPRESS=LZW")
+
+res_1km <- (res(esa_brazil)[1] * 3)
+
+res_1km / res(esa_brazil)[1]
+
+esa_1deg_filename <- "Projects/Amazon/Data/ESA_Brazil_1deg.tif"
+
+
+if (!file.exists(esa_1deg_filename))
+{
+
+  tic("1deg")
+  lc_1deg <- raster::aggregate(esa_brazil, fact = 1 / res(esa_brazil)[1])
+  toc()
+
+  writeRaster(lc_1deg, esa_1deg_filename, options = "COMPRESS=LZW")
+  
+}
+
+# tic("half degree")
+# lc_05deg <- raster::aggregate(esa_brazil, fact = 0.5 / res(esa_brazil)[1])
+# toc()
+
+# tic("2 degree")
+# lc_2deg <- raster::aggregate(esa_brazil, fact = 2 / res(esa_brazil)[1])
+# toc()
+
+
+
+esa_1km_filename <- "Projects/Amazon/Data/ESA_Brazil_1km.tif"
+
+if (!file.exists(esa_1km_filename))
+{
+
+  tic("1km")
+  lc_1km <- raster::aggregate(esa_brazil, fact = 3)
+  toc()
+
+  writeRaster(lc_1km, esa_1km_filename, options = "COMPRESS=LZW")
+  
+} else {
+  lc_1km <- raster(esa_1km_filename)
+}
+
+
+
+
+
+mask_1deg <- rasterToPolygons(lc_1deg) %>% 
+  st_as_sf() %>% 
+  transmute(
+    vals = 1:n()
+  )
+
+my_intersect <- st_intersection(x = mask_1deg, y = fires_viirs_lc)
+
+fires_count <- my_intersect %>% 
+  st_set_geometry(NULL) %>% 
+  dplyr::select(vals, ESA_Brazil) %>% 
+  group_by(vals) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  arrange(desc(n))
+
+my_counts <- mask_1deg %>% 
+  left_join(fires_count, by = "vals")
+
+
+my_counts %>%
+  # arrange(desc(n))
+  filter(n < 250) %>% 
+  mapview(zcol = "n")
+
+plot(my_counts[2])
+mapview(fires_lc, zcol = "ESA_Brazil")
+mapview(my_counts, zcol = "n")# + mapview(fires_viirs_lc)
+
+```
+
+Category:
+50 Treecover broadleaved, evergreen
+120 Shrubland
+180 Shrub or hebaceous cover
+30 Mosaic cropland (>50% crops)
+100 Mosaic tree and shrub (>50%)
+130 Grassland
+11 Herbaceous cover crops
+61 Tree cover, broadleaved, closed
+
+
+What is the most common type of land that is burning?
+What are the frequencies?
+
+Calculate distance from roads.
+Calculate distance from current crops.
+Calculate distance from urban areas.
+
+#### Distance from features
+
+```{r eval=FALSE, include=TRUE}
+fires_viirs_lc
+
+lc_1km
+roads_raw
+roads_rasterized <- "Projects/Amazon/Data/roads_rasterized.tif"
+
+tic("Rasterizing roads")
+  rasterize_call <- glue::glue("gdal_rasterize -tr {round(res_1km, 12)} {round(res_1km, 12)} -te -180 -57 180 84 -l GRIP_roads_subset -burn 1 -a_nodata NA -co compress=LZW {roads_filename} {roads_rasterized}")
+  # system(rasterize_call)
+  toc()
+
+  
+
+# roads_raster <- fasterize::fasterize(roads_raw, lc_1km)
+
+
+```
+
+
+#### Temporal trends
+
+
+```{r}
+
+viirs_date <- historical_viirs %>% 
+  transmute(
+    acq_date,
+    period = str_c(month(acq_date), "_", year(acq_date))
+  ) %>% 
+  rename(geometry = geom)
+
+viirs_date_freq <- viirs_date %>% 
+  # sample_n(1000) %>% 
+  group_by(period) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(period, .keep_all = TRUE)
+
+viirs_date_freq %>% 
+  # sample_n(10000) %>% 
+  ggplot() +
+  aes(x = acq_date, y = n) +
+  # geom_line() +
+  geom_col() +
+  scale_x_date(date_labels = "%b %Y",
+               date_breaks = "6 months",
+               position = "bottom") +
+  theme_minimal()
+  NULL
+
+
+```
+
+#### Fire frequency per state
+
+Break down the same over time per state
+```{r}
+
+
+
+historical_viirs_brazil_name <- "Data/historical_viirs_brazil.gpkg"
+
+if (!file.exists(historical_viirs_brazil_name))
+{
+  historical_viirs_brazil <- st_join(viirs_date, brazil_adm, join = st_intersects)
+  
+  historical_viirs_brazil %>% 
+    st_write(historical_viirs_brazil_name)
+} else {
+  historical_viirs_brazil <- st_read(historical_viirs_brazil_name)
+}
+
+
+historical_viirs_brazil_cleaned <- historical_viirs_brazil %>% 
+  mutate(id = str_c(period, "_", NAME_1)) %>% 
+  filter(!is.na(NAME_0)) %>% 
+  group_by(NAME_1, period) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  distinct(id, .keep_all = TRUE)
+
+
+historical_viirs_brazil_cleaned %>%
+  distinct(period, .keep_all = TRUE) %>% 
+  transmute(acq_date, NAME_1, n) %>% 
+  ggplot() +
+  aes(x = acq_date, y = n) +
+  # geom_line() +
+  geom_col(fill = "red2") +
+  scale_x_date(date_labels = "%b %Y",
+               date_breaks = "6 months",
+               position = "bottom") +
+  theme_minimal() +
+  # facet_grid(~ NAME_1)
+  NULL
+
+my_dates <- historical_viirs_brazil %>% 
+  st_set_geometry(NULL) %>% 
+  distinct(acq_date)
+  
+my_states <- historical_viirs_brazil %>% 
+  st_set_geometry(NULL) %>% 
+  distinct(NAME_1) %>% 
+  filter(!is.na(NAME_1)) %>% 
+  pull() %>% 
+  as.character()
+
+
+historical_fires_df <- historical_viirs_brazil_cleaned %>% 
+  st_set_geometry(NULL) %>% 
+  transmute(acq_date, NAME_1, id, n)
+
+fires_freq_brazil <- crossing(my_dates, my_states) %>% 
+  mutate(
+        period = str_c(month(acq_date), "_", year(acq_date)),
+        id = str_c(period, "_", my_states)
+  ) %>% 
+  left_join(historical_fires_df, by = "id") %>% 
+  transmute(
+    id,
+    acq_date = acq_date.x,
+    state = my_states,
+    period,
+    fires_n = ifelse(is.na(n), 0, n)
+  ) %>% 
+  distinct(id, .keep_all = TRUE)
+
+
+top_fire_states <- fires_freq_brazil %>% 
+  group_by(state) %>% 
+  summarize(n_sum = sum(fires_n)) %>% 
+  ungroup() %>% 
+  top_n(16, n_sum) %>% 
+  pull(state)
+
+fires_freq_brazil %>% 
+  filter(state %in% top_fire_states) %>%
+    ggplot() +
+  aes(x = acq_date, y = fires_n) +
+  # geom_line(color = "red") +
+  geom_col(color = "red2") +
+  scale_x_date(date_labels = "%Y",
+               date_breaks = "1 year") +
+  labs(x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),
+    strip.text = element_text(size = 16),
+    axis.text.x = element_text(size = 10), 
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    # panel.grid.major.x = element_blank(),
+    NULL
+  ) +
+  facet_wrap(~ state)
+  
+
+```
+
+#### Indigenous territories
+
+```{r}
+
+
+indigenous_areas_brazil <- indigenous_areas %>%
+  filter(country == "Brasil")
+
+
+mydat <-  points_fire_proportion %>% 
+  st_set_geometry(NULL)  %>% 
+    sample_n(100)# %>%
+    # pull(pct)
+
+brks_scale <- levels(mydat$pct_rcl)
+labels_scale <- str_c(rev(brks_scale), "%")
+labels_scale2 <- c("76 - 100%", "51 - 75%", "26 - 50%", "1 - 25%", "0%")
+
+
+colorscale <- c('#fc8d59','#ef6548','#d7301f','#b30000','#7f0000')
+
+
+
+p_ind <- ggplot() +
+  #### Basemap - natural earth
+  geom_tile(data = NE_samer_small_gg, aes(x = x, y = y, fill = NE_samer_small),
+            show.legend = FALSE) +
+  #### Basemap colorscheme
+  scale_fill_gradient2(low = "grey60",
+                       mid = "lightyellow2",
+                       high = "grey40") + # Grey
+    #### IFL forest layer aggregated (faster plotting)
+  geom_tile(data = NE_amazon_forest_gg, aes(x = x, y = y, fill = NE_samer_amazon), alpha = 0.45, fill = "green2") +
+  #### Only brazil - events per state, and density
+  # geom_sf(data = current_viirs_brazil_cleaned, color = "red2", size = 0.95,
+  #### Full version of IFL (I guess)
+  # geom_tile(data = ifl_raster_gg, aes(x = x, y = y, fill = IFL_raster), color = "green") +
+ geom_sf(data = indigenous_areas_brazil, fill = "orange", alpha = 0.3, color = "grey1") +
+  #### Fires proportional circles (color not mapped)
+   # geom_sf(data = points_fire_proportion, aes(size = n, color = pct), 
+        ## Smaller dataset (faster plotting)
+         # geom_sf(data = fire_sample, color = "red2", size = 0.95,
+         # alpha = 0.7, inherit.aes = FALSE) +
+#### Amazon biome outline
+    geom_sf(data = amazon_biome, fill = "green", alpha = 0.1) +
+  #### South america country borders    
+  # geom_sf(data = samer_countries, fill = NA,
+    # color = "grey45") +
+  #### Fires proprtional circles (colors mapped)
+  geom_sf(data = points_fire_proportion, aes(size = n, color = pct_rcl),
+          # color = "red2",
+          inherit.aes = FALSE) +
+  scale_color_manual(
+          # in manual scales, one has to define colors, well, manually
+          # I can directly access them using viridis' magma-function
+          values = colorscale,
+          breaks = rev(brks_scale)) +
+      # scale_color_gradient(low = "#d7301f", high = "#7f0000") +
+   coord_sf(datum = NA, xlim = c(-78, -42), ylim = c(-21, 12)) +
+    theme_map() +
+  theme(
+    legend.position = "none"
+  )
+
+# p_ind
+
+ggsave("Output/Figures/map_firefreq_indigenous.png", p_ind,
+       dpi = 300, width = 16, height = 12)
+
+ggsave("Output/Figures/map_firefreq_indigenous2.png", p_ind,
+       dpi = 400, width = 16, height = 12)
+
+
+colorscale_gg <- mydat %>% 
+    # select(qq, pct) %>% head
+    ggplot() +
+    aes(x = 1, y = pct_rcl) +
+    geom_tile(aes(fill = pct_rcl)) +
+  theme(
+    legend.margin=margin(c(1,5,5,5))
+    ) +
+   scale_fill_manual(
+          # in manual scales, one has to define colors, well, manually
+          # I can directly access them using viridis' magma-function
+          values = colorscale,
+          breaks = rev(brks_scale),
+          labels = labels_scale2,
+          drop = FALSE,
+          guide = guide_legend(
+            direction = "horizontal",
+            keyheight = unit(5, units = "mm"),
+            keywidth = unit(50 / length(labels), units = "mm"),
+            title.position = "top",
+            title = "Percentage of forests burnt",
+            title.theme = element_text(size = 38, 
+                                       # face = "italic",
+                                       family = "AvantGarde"),
+            # I shift the labels around, the should be placed 
+            # exactly at the right end of each legend key
+            title.hjust = 0.5,
+            label.theme = element_text(size = 24, 
+                                       # face = "italic",
+                                       family = "AvantGarde"),
+            # label.hjust = 1,
+            nrow = 1,
+            byrow = T,
+            # also the guide needs to be reversed
+            reverse = T,
+            label.position = "bottom",
+            NULL
+            )
+      ) +
+  theme(
+    plot.margin = margin(t = 10, r = 100, b = 10, l = 10, unit = "cm")
+  )
+
+
+library(ggpubr)
+library(gridExtra)
+library(grid)
+colorscale_gg_legend <- ggpubr::get_legend(colorscale_gg)
+plot.new()
+
+blank <- rectGrob(gp=gpar(col="white"), width = 0.02)
+grid.arrange(colorscale_gg_legend, pointscale_gg_legend, 
+             ncol = 2
+             )
+
+
+
+ggsave("Output/Figures/legend_colorscale_map.png", colorscale_gg_legend,
+       dpi = 300, width = 16, height = 6)
+
+
+#### Create legend for proportional points
+
+pointscale_gg <- points_fire_proportion %>% 
+    mutate(
+      n_rcl = as.factor(case_when(
+        n <= 10 ~ "0 - 10",
+        n > 10 & n <= 100 ~ "11 - 100",
+        n > 100 & n <= max(n) ~ "101 - 500+",
+        TRUE ~ as.character(n)
+      )),
+      n_num = case_when(
+        n <= 10 ~ 10,
+        n > 10 & n <= 100 ~ 100,
+        n > 100 & n <= max(n) ~ 1000,
+        TRUE ~ 0
+      ),
+      n_rcl = fct_relevel(n_rcl, levels = c("0 - 10", "11 - 100", "101 - 500+"))
+    ) %>% 
+    # tabyl(n_rcl)
+  # select(qq, pct) %>% head
+    ggplot() +
+    aes(x = 1, y = n_rcl) +
+  geom_point(aes(size = n_rcl), color = "#b30000") +
+  guides(size = guide_legend(
+    direction = "horizontal",
+    keyheight = unit(5, units = "mm"),
+    # keyheight = unit(10, units = "mm"),
+    # keywidth = unit(10, units = "mm"),
+    title = "Number of fires",          
+    title.position = 'top',
+    title.theme = element_text(size = 38, 
+                               # face = "italic",
+                               family = "AvantGarde"),
+    # I shift the labels around, the should be placed 
+    # exactly at the right end of each legend key
+    # title.hjust = 0.5,
+    # title.vjust = -1,
+    label.theme = element_text(size = 24, 
+                               # face = "italic",
+                               family = "AvantGarde"),
+    # label.hjust = 1,
+    # nrow = 1,
+    # byrow = T,
+    # also the guide needs to be reversed
+    # reverse = T,
+            label.position = "bottom",
+    NULL
+    )
+  
+)
+
+pointscale_gg_legend <- get_legend(pointscale_gg)
+plot.new()
+ggdraw(pointscale_gg_legend, xlim = c(0, 1))
+
+ggsave("Output/Figures/legend_pointscale_map.png", pointscale_gg_legend,
+       dpi = 300)#, width = 8, height = 6)
+
+
+plot_grid(p_ind, colorscale_gg_legend, nrow = 2,
+          rel_heights = c(2, 1)
+          )
+
+
+
+combined_leg <- (ggdraw(pointscale_gg_legend) | ggdraw(colorscale_gg_legend))
+
+combined_leg
+
+```
+
+#### Plot short
+```{r}
+
+amazon_main <- "Data_raw/CD06_CAMREX_1086/data/amzmainstm_v/amzmainstm_v.shp" %>% 
+  st_read() %>% 
+  st_transform(crs = st_crs(amazon_biome))
+
+# r_stack <- stack(NE_samer_small, ifl_raster_resampled)
+
+NE_samer_small_ggg <- raster_to_gg(r_stack[[1]])
+# NE_samer_large_gg <- raster_to_gg(NE_samer_large)
+NE_amazon_forest_ggg <- raster_to_gg(r_stack[[2]])
+
+plot_firedens <- ggplot() +
+      # geom_sf(data = current_viirs_brazil_cleaned, color = "red", size = 0.95,
+  # geom_sf(data = ama) +
+  geom_tile(data = NE_samer_small_ggg, aes(x = x, y = y, fill = NE_samer_small),
+            show.legend = FALSE) +
+  scale_fill_gradient2(low = "grey60", 
+                       mid = "lightyellow2",
+                       high = "grey40") + # Grey
+  geom_tile(data = NE_amazon_forest_ggg, aes(x = x, y = y, fill = ifl_raster_resampled), alpha = 0.45, fill = "green2") +
+  # geom_sf(data = current_viirs_brazil_cleaned, color = "red2", size = 0.95,
+  # geom_tile(data = ifl_raster_gg, aes(x = x, y = y, fill = IFL_raster), color = "green") +
+  # geom_sf(data = amazon_main, color = "blue2", size = 1, alpha = 0.6) +
+  # geom_sf(data = indigenous_areas_brazil, fill = "orange", alpha = 0.9, color = "grey10") +
+  #### Fires proportional circles (color not mapped)
+   # geom_sf(data = points_fire_proportion, aes(size = n, color = pct), 
+        ## Smaller dataset (faster plotting)
+         # geom_sf(data = fire_sample, color = "red2", size = 0.95,
+         # alpha = 0.7, inherit.aes = FALSE) +
+#### Amazon biome outline
+    # geom_sf(data = amazon_biome, fill = NA, alpha = 0.1) +
+
+  #### South america country borders    
+  # geom_sf(data = samer_countries, fill = NA,
+    # color = "grey45") +
+  #### Fires proprtional circles (colors mapped)
+  geom_sf(data = points_fire_proportion, aes(size = n, color = pct_rcl),
+          # color = "red2",
+          inherit.aes = FALSE) +
+  scale_color_manual(
+          # in manual scales, one has to define colors, well, manually
+          # I can directly access them using viridis' magma-function
+          values = colorscale,
+          breaks = rev(brks_scale)) +
+ 
+      geom_sf(data = samer_countries, fill = NA,
+    # # linetype = "dotted",
+    color = "grey40") +
+  geom_sf(data = amazon_biome, fill = NA, alpha = 0.1, color = "grey10",
+          size = 1) +
+  coord_sf(datum = NA, xlim = c(-78, -42), ylim = c(-19, 10)) +
+    theme_map() +
+  theme(
+    legend.position = "none"
+  )
+
+plot_firedens
+
+ggsave("Output/Figures/map_firefreq_indigenous.png", plot_firedens,
+        dpi = 400, width = 16, height = 12)
+
+
+```
+
+
